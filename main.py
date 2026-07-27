@@ -1,10 +1,11 @@
 import argparse
+import sys
 from openai import OpenAI
 import os
 import json
 from dotenv import load_dotenv
 from prompts import system_prompt
-from functions.call_function import available_functions
+from functions.call_function import available_functions, call_function
 load_dotenv()
 api_key = os.environ.get("OPENROUTER_API_KEY")
 if api_key is None:
@@ -23,22 +24,46 @@ messages = [
     {"role": "system", "content": system_prompt},
     {"role": "user", "content": args.user_prompt},
 ]
-response = client.chat.completions.create(
-    model       = "openrouter/free",
-    messages    = messages,
-    tools       = available_functions,
-)
-if response.usage is None:
-    raise Exception("Response usage is None - API request may have failed")
-if args.verbose is True:  
-    print(f"User prompt: {args.user_prompt}")  
-    print(f"Prompt tokens: {response.usage.prompt_tokens}")
-    print(f"Response tokens: {response.usage.completion_tokens}")
-message = response.choices[0].message
+for i in range(20):
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-20b:free",
+        messages=messages,
+        tools=available_functions,
+    )
+
+    if response.usage is None:
+        raise Exception("Response usage is None - API request may have failed")
+
+    if args.verbose:
+        print(f"Prompt tokens: {response.usage.prompt_tokens}")
+        print(f"Response tokens: {response.usage.completion_tokens}")
+    message = response.choices[0].message
+    messages.append(message)
+
+    if not message.tool_calls:
+        print("Final response:")
+        print(message.content)
+        break
+
+    for tool_call in message.tool_calls:
+        result_message = call_function(tool_call, verbose=args.verbose)
+
+        if not result_message["content"]:
+            raise Exception("Fatal: call_function result did not contain content")
+
+        messages.append(result_message)
+else:
+    print("Error: Maximum iterations reached without a final response.")
+    exit(1)        
 
 if message.tool_calls:
     for tool_call in message.tool_calls:
-        function_args = json.loads(tool_call.function.arguments or "{}")
-        print(f"Calling function: {tool_call.function.name}({function_args})")
+        result_message = call_function(tool_call, verbose=args.verbose)
+
+        if not result_message["content"]:
+            raise Exception("Fatal: call_function result did not contain content")
+
+        if args.verbose:
+            print(f"-> {result_message['content']}")
 else:
     print(message.content)
