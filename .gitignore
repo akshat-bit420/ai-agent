@@ -12,3 +12,5 @@ wheels/
 
 # Don't want them to know
 prompts.py
+calculator/README.md
+calculator/test_output.txt
